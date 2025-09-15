@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/* small helpers for background gradients based on weather */
+.bg-clear {
+background: linear-gradient(180deg, #60a5fa 0%, #0ea5e9 60%, #0369a1 100%);
+}
+.bg-clouds {
+background: linear-gradient(180deg, #cbd5e1 0%, #94a3b8 60%, #475569 100%);
+}
+.bg-rain {
+background: linear-gradient(180deg, #64748b 0%, #0f172a 60%);
+}
+.bg-snow {
+background: linear-gradient(180deg, #e6f0ff 0%, #c7e0ff 60%);
+}
