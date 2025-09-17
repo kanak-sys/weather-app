@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable no-unused-vars */
 import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import axios from 'axios'
@@ -199,14 +200,81 @@ export default function App() {
     localStorage.setItem('recentWeatherSearches', JSON.stringify(updated))
   }
 
-  const fetchByCoords = useCallback(async (lat, lon, label) => {
+  const fetchWeatherData = useCallback(async (lat, lon, label) => {
     try {
       setLoading(true)
       setError(null)
       
-      const url = `https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&units=${unit}&exclude=minutely,alerts&appid=${API_KEY}`
-      const res = await axios.get(url)
-      setWeather(res.data)
+      // First get current weather and forecast
+      const currentUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=${unit}&appid=${API_KEY}`
+      const forecastUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=${unit}&appid=${API_KEY}`
+      
+      const [currentRes, forecastRes] = await Promise.all([
+        axios.get(currentUrl),
+        axios.get(forecastUrl)
+      ])
+      
+      // Transform the data to match the expected format
+      const transformedData = {
+        current: {
+          dt: currentRes.data.dt,
+          sunrise: currentRes.data.sys.sunrise,
+          sunset: currentRes.data.sys.sunset,
+          temp: currentRes.data.main.temp,
+          feels_like: currentRes.data.main.feels_like,
+          pressure: currentRes.data.main.pressure,
+          humidity: currentRes.data.main.humidity,
+          uvi: 0, // UV index not available in free API
+          visibility: currentRes.data.visibility,
+          wind_speed: currentRes.data.wind.speed,
+          wind_deg: currentRes.data.wind.deg,
+          weather: currentRes.data.weather,
+        },
+        hourly: forecastRes.data.list.slice(0, 8).map(item => ({
+          dt: item.dt,
+          temp: item.main.temp,
+          feels_like: item.main.feels_like,
+          pressure: item.main.pressure,
+          humidity: item.main.humidity,
+          weather: item.weather,
+          pop: item.pop,
+          visibility: item.visibility,
+          wind_speed: item.wind.speed,
+          wind_deg: item.wind.deg,
+        })),
+        daily: [], // Daily forecast not available in free API, we'll calculate it
+      }
+      
+      // Calculate daily forecast from 3-hour intervals
+      const dailyForecast = {}
+      forecastRes.data.list.forEach(item => {
+        const date = dayjs.unix(item.dt).format('YYYY-MM-DD')
+        if (!dailyForecast[date]) {
+          dailyForecast[date] = {
+            dt: item.dt,
+            temp: {
+              min: item.main.temp_min,
+              max: item.main.temp_max,
+            },
+            weather: item.weather,
+            pop: item.pop,
+          }
+        } else {
+          if (item.main.temp_min < dailyForecast[date].temp.min) {
+            dailyForecast[date].temp.min = item.main.temp_min
+          }
+          if (item.main.temp_max > dailyForecast[date].temp.max) {
+            dailyForecast[date].temp.max = item.main.temp_max
+          }
+          if (item.pop > dailyForecast[date].pop) {
+            dailyForecast[date].pop = item.pop
+          }
+        }
+      })
+      
+      transformedData.daily = Object.values(dailyForecast).slice(0, 7)
+      
+      setWeather(transformedData)
       
       // If we have a label, set location and save to recent searches
       if (label) {
@@ -238,7 +306,7 @@ export default function App() {
       const { lat, lon, name, state, country } = geo.data[0]
       const label = `${name}${state ? ', ' + state : ''}, ${country}`
       
-      await fetchByCoords(lat, lon, label)
+      await fetchWeatherData(lat, lon, label)
     } catch (err) {
       setError('Failed to fetch location')
       console.error(err)
@@ -255,7 +323,7 @@ export default function App() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords
-        fetchByCoords(latitude, longitude, 'Your location')
+        fetchWeatherData(latitude, longitude, 'Your location')
       },
       (err) => {
         setError('Permission denied or location unavailable')
@@ -285,7 +353,7 @@ export default function App() {
   // Refresh weather data
   const refreshData = () => {
     if (location) {
-      fetchByCoords(location.lat, location.lon, location.name)
+      fetchWeatherData(location.lat, location.lon, location.name)
     }
   }
 
@@ -335,7 +403,7 @@ export default function App() {
     return 'from-slate-900 via-blue-900 to-slate-800'
   }
 
-  if (!weather) {
+  if (!weather && loading) {
     return (
       <div className={`min-h-screen bg-gradient-to-br ${getBackgroundClass()} text-white transition-all duration-1000`}>
         <div className="container mx-auto p-6">
@@ -420,7 +488,7 @@ export default function App() {
                 <button
                   key={i}
                   onClick={() => {
-                    fetchByCoords(item.lat, item.lon, item.name)
+                    fetchWeatherData(item.lat, item.lon, item.name)
                     setShowRecent(false)
                   }}
                   className="w-full p-3 text-left hover:bg-slate-700/50 flex items-center gap-3"
@@ -437,183 +505,187 @@ export default function App() {
           <div className="p-4 mb-6 bg-red-600/60 rounded-2xl backdrop-blur-sm">{error}</div>
         )}
 
-        {/* Main Weather Card */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          {/* Current Weather */}
-          <div className="lg:col-span-2 p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
-            <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-2xl font-bold">{location?.name}</h2>
-                <p className="text-slate-300">{dayjs.unix(weather.current.dt).format('dddd, MMMM Do')}</p>
-              </div>
-              <div className="flex items-center gap-4">
-                <UvIndicator uvIndex={weather.current.uvi} />
-                <button className="p-2 hover:bg-white/10 rounded-xl transition-colors">
-                  <BsThreeDotsVertical />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <WeatherIcon 
-                    code={weather.current.weather[0].icon} 
-                    size={120} 
-                    isDay={weather.current.dt > weather.current.sunrise && weather.current.dt < weather.current.sunset}
-                  />
-                </div>
-                <div>
-                  <div className="text-6xl font-bold">{Math.round(weather.current.temp)}°</div>
-                  <div className="text-xl capitalize mt-1">{weather.current.weather[0].description}</div>
-                  <div className="text-slate-300 mt-2">Feels like {Math.round(weather.current.feels_like)}°</div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mt-6 lg:mt-0">
-                <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
-                  <WiHumidity size={32} className="text-blue-400" />
+        {weather && (
+          <>
+            {/* Main Weather Card */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+              {/* Current Weather */}
+              <div className="lg:col-span-2 p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
+                <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
                   <div>
-                    <div className="text-sm text-slate-400">Humidity</div>
-                    <div className="font-medium">{weather.current.humidity}%</div>
+                    <h2 className="text-2xl font-bold">{location?.name}</h2>
+                    <p className="text-slate-300">{dayjs.unix(weather.current.dt).format('dddd, MMMM Do')}</p>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <UvIndicator uvIndex={weather.current.uvi || 0} />
+                    <button className="p-2 hover:bg-white/10 rounded-xl transition-colors">
+                      <BsThreeDotsVertical />
+                    </button>
                   </div>
                 </div>
+
+                <div className="flex flex-wrap items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="relative">
+                      <WeatherIcon 
+                        code={weather.current.weather[0].icon} 
+                        size={120} 
+                        isDay={weather.current.dt > weather.current.sunrise && weather.current.dt < weather.current.sunset}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-6xl font-bold">{Math.round(weather.current.temp)}°</div>
+                      <div className="text-xl capitalize mt-1">{weather.current.weather[0].description}</div>
+                      <div className="text-slate-300 mt-2">Feels like {Math.round(weather.current.feels_like)}°</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mt-6 lg:mt-0">
+                    <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
+                      <WiHumidity size={32} className="text-blue-400" />
+                      <div>
+                        <div className="text-sm text-slate-400">Humidity</div>
+                        <div className="font-medium">{weather.current.humidity}%</div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
+                      <WiBarometer size={32} className="text-purple-400" />
+                      <div>
+                        <div className="text-sm text-slate-400">Pressure</div>
+                        <div className="font-medium">{weather.current.pressure} hPa</div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
+                      <WiStrongWind size={32} className="text-green-400" />
+                      <div>
+                        <div className="text-sm text-slate-400">Wind</div>
+                        <WindDirection deg={weather.current.wind_deg} speed={weather.current.wind_speed} />
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
+                      <BsEye size={24} className="text-yellow-400" />
+                      <div>
+                        <div className="text-sm text-slate-400">Visibility</div>
+                        <div className="font-medium">{(weather.current.visibility / 1000).toFixed(1)} km</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sunrise/Sunset & Highlights */}
+              <div className="p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
+                <h3 className="text-xl font-semibold mb-6">Today's Highlights</h3>
                 
-                <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
-                  <WiBarometer size={32} className="text-purple-400" />
-                  <div>
-                    <div className="text-sm text-slate-400">Pressure</div>
-                    <div className="font-medium">{weather.current.pressure} hPa</div>
+                <div className="space-y-5">
+                  <div className="p-4 bg-white/5 rounded-2xl">
+                    <div className="flex items-center gap-2 mb-3">
+                      <WiSunrise size={24} className="text-orange-400" />
+                      <span className="font-medium">Sunrise & Sunset</span>
+                    </div>
+                    <SunProgress 
+                      sunrise={weather.current.sunrise} 
+                      sunset={weather.current.sunset} 
+                      current={weather.current.dt} 
+                    />
+                  </div>
+                  
+                  <div className="p-4 bg-white/5 rounded-2xl">
+                    <div className="flex items-center gap-2 mb-3">
+                      <BsUmbrella size={20} className="text-blue-400" />
+                      <span className="font-medium">Precipitation</span>
+                    </div>
+                    <div className="text-3xl font-bold">
+                      {weather.hourly[0]?.pop ? Math.round(weather.hourly[0].pop * 100) : 0}%
+                    </div>
+                    <div className="text-sm text-slate-400 mt-1">Chance of rain</div>
+                  </div>
+                  
+                  <div className="p-4 bg-white/5 rounded-2xl">
+                    <div className="flex items-center gap-2 mb-3">
+                      <BsCloudRainHeavy size={20} className="text-purple-400" />
+                      <span className="font-medium">UV Index</span>
+                    </div>
+                    <UvIndicator uvIndex={weather.current.uvi || 0} />
+                    <div className="text-sm text-slate-400 mt-2">Sun protection needed</div>
                   </div>
                 </div>
-                
-                <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
-                  <WiStrongWind size={32} className="text-green-400" />
-                  <div>
-                    <div className="text-sm text-slate-400">Wind</div>
-                    <WindDirection deg={weather.current.wind_deg} speed={weather.current.wind_speed} />
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-3 p-3 bg-white/5 rounded-xl">
-                  <BsEye size={24} className="text-yellow-400" />
-                  <div>
-                    <div className="text-sm text-slate-400">Visibility</div>
-                    <div className="font-medium">{(weather.current.visibility / 1000).toFixed(1)} km</div>
-                  </div>
+              </div>
+            </div>
+
+            {/* Hourly Forecast */}
+            <div className="p-6 mb-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
+              <h3 className="text-xl font-semibold mb-6">24-Hour Forecast</h3>
+              <div className="overflow-x-auto">
+                <div className="flex gap-4 min-w-max pb-4">
+                  <HourlyItem data={weather.hourly[0]} isNow={true} />
+                  {weather.hourly.slice(1, 8).map((hour, i) => (
+                    <HourlyItem key={i} data={hour} />
+                  ))}
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Sunrise/Sunset & Highlights */}
-          <div className="p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
-            <h3 className="text-xl font-semibold mb-6">Today's Highlights</h3>
-            
-            <div className="space-y-5">
-              <div className="p-4 bg-white/5 rounded-2xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <WiSunrise size={24} className="text-orange-400" />
-                  <span className="font-medium">Sunrise & Sunset</span>
+            {/* Charts and Weekly Forecast */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {/* Temperature Chart */}
+              <div className="p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
+                <h3 className="text-xl font-semibold mb-6">Temperature Trend</h3>
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={hourlyChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="tempGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stop="#60a5fa" stopOpacity={0.8}/>
+                          <stop offset="95%" stop="#60a5fa" stopOpacity={0.1}/>
+                        </linearGradient>
+                      </defs>
+                      <XAxis dataKey="time" tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
+                      <YAxis tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Area type="monotone" dataKey="temp" stroke="#60a5fa" fillOpacity={1} fill="url(#tempGradient)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
-                <SunProgress 
-                  sunrise={weather.current.sunrise} 
-                  sunset={weather.current.sunset} 
-                  current={weather.current.dt} 
-                />
               </div>
-              
-              <div className="p-4 bg-white/5 rounded-2xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <BsUmbrella size={20} className="text-blue-400" />
-                  <span className="font-medium">Precipitation</span>
+
+              {/* Rain Probability Chart */}
+              <div className="p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
+                <h3 className="text-xl font-semibold mb-6">Rain Probability</h3>
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={hourlyChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <XAxis dataKey="time" tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
+                      <YAxis tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar dataKey="pop" fill="#818cf8" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-                <div className="text-3xl font-bold">
-                  {weather.hourly[0]?.pop ? Math.round(weather.hourly[0].pop * 100) : 0}%
-                </div>
-                <div className="text-sm text-slate-400 mt-1">Chance of rain</div>
-              </div>
-              
-              <div className="p-4 bg-white/5 rounded-2xl">
-                <div className="flex items-center gap-2 mb-3">
-                  <BsCloudRainHeavy size={20} className="text-purple-400" />
-                  <span className="font-medium">UV Index</span>
-                </div>
-                <UvIndicator uvIndex={weather.current.uvi} />
-                <div className="text-sm text-slate-400 mt-2">Sun protection needed</div>
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Hourly Forecast */}
-        <div className="p-6 mb-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
-          <h3 className="text-xl font-semibold mb-6">24-Hour Forecast</h3>
-          <div className="overflow-x-auto">
-            <div className="flex gap-4 min-w-max pb-4">
-              <HourlyItem data={weather.hourly[0]} isNow={true} />
-              {weather.hourly.slice(1, 24).map((hour, i) => (
-                <HourlyItem key={i} data={hour} />
-              ))}
+            {/* Weekly Forecast */}
+            <div className="p-6 mb-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
+              <h3 className="text-xl font-semibold mb-6">7-Day Forecast</h3>
+              <div className="space-y-3">
+                {weather.daily.map((day, i) => (
+                  <DailyItem key={i} data={day} />
+                ))}
+              </div>
             </div>
-          </div>
-        </div>
-
-        {/* Charts and Weekly Forecast */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          {/* Temperature Chart */}
-          <div className="p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
-            <h3 className="text-xl font-semibold mb-6">Temperature Trend</h3>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={hourlyChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                  <defs>
-                    <linearGradient id="tempGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stop="#60a5fa" stopOpacity={0.8}/>
-                      <stop offset="95%" stop="#60a5fa" stopOpacity={0.1}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="time" tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
-                  <YAxis tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Area type="monotone" dataKey="temp" stroke="#60a5fa" fillOpacity={1} fill="url(#tempGradient)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Rain Probability Chart */}
-          <div className="p-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
-            <h3 className="text-xl font-semibold mb-6">Rain Probability</h3>
-            <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={hourlyChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                  <XAxis dataKey="time" tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
-                  <YAxis tick={{ fill: 'rgba(255, 255, 255, 0.7)', fontSize: 12 }} />
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255, 255, 255, 0.1)" />
-                  <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="pop" fill="#818cf8" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-
-        {/* Weekly Forecast */}
-        <div className="p-6 mb-6 bg-white/10 rounded-3xl backdrop-blur-md border border-white/10">
-          <h3 className="text-xl font-semibold mb-6">7-Day Forecast</h3>
-          <div className="space-y-3">
-            {weather.daily.map((day, i) => (
-              <DailyItem key={i} data={day} />
-            ))}
-          </div>
-        </div>
+          </>
+        )}
 
         {/* Footer */}
         <footer className="text-center text-sm text-slate-400 py-6">
           <p>Powered by OpenWeatherMap • Data updates in real-time</p>
-          <p className="mt-2">Remember to add VITE_OPENWEATHER_KEY in your .env</p>
+          <p className="mt-2">Made With ❤️ by Kanak.</p>
         </footer>
       </div>
     </div>
