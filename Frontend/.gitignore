@@ -37,6 +37,7 @@ dist-ssr
 
 # misc
 .DS_Store
+Frontend/.env
 .env
 .env.local
 .env.development.local
